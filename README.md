@@ -32,6 +32,13 @@ beauty/
 └─ environment.yaml               # 主环境（beauty）
 ```
 
+**参数下载：**
+CSDMT和Retuochformer的参数均以百度网盘的方式提供
+| 模型 | 链接 | 密码 |  放置位置 |
+|---|---|---|---|
+| CSDMT | https://pan.baidu.com/s/1eVgPN12KJN8GSdOw544ZdQ |  reto  | /beauty/CSD_MT/faceutils/face_parsing/res/cp/79999_iter.pth|
+| Retouchformer | https://pan.baidu.com/s/1C7K4xk5W0X65yUQh41AmfQ | 1d3e |  /beauty/retouchformer/release_model/gen_best.pth |
+
 **环境文件位置：**
 - 主环境（beauty）：`/root/autodl-tmp/beauty/environment.yaml`
 - CSD-MT：`/root/autodl-tmp/beauty/CSD_MT/environment.yaml`

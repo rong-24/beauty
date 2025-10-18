@@ -1,0 +1,40 @@
+# Python / Conda
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+env/
+*.egg-info/
+.ipynb_checkpoints
+
+# OS
+.DS_Store
+
+# Logs & temp
+*.log
+logs/
+tmp/
+temp/
+
+# Project outputs / caches
+outputs/
+outputs_batch/
+**/results/
+**/rf_out/
+**/beauty_run_*/
+**/beauty_web_*/
+gradio_cached_examples/
+
+# Model weights (默认忽略大权重与checkpoints)
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+**/release_model/*
+**/faceutils/res/cp/*.pth
+weights/
+
+# Data
+data/
+datasets/

@@ -71,7 +71,7 @@ conda env create -f /root/autodl-tmp/beauty/retouchformer/environment.yaml
 
 ---
 
-## 🚀 命令行一键流水线（推荐）
+## 🚀 命令行一键流水线
 
 脚本：`beauty_pipeline.sh`（已适配两个独立 conda 环境）。
 
@@ -138,15 +138,10 @@ python /root/autodl-tmp/beauty/app_gradio.py
 
 ---
 
-## 📈 示例输出（可选，用于 README 展示）
+## 📈 示例输出
 
-将如下占位图替换为你的真实样例：
+<img width="1212" height="798" alt="图片" src="https://github.com/user-attachments/assets/421aa507-1df2-4faf-8a57-765926922026" />
 
-```markdown
-| 原图 | 妆容参考 | 修饰图 | 最终成品 |
-|:---:|:---:|:---:|:---:|
-| ![](docs/example_non.jpg) | ![](docs/example_style.jpg) | ![](docs/example_retouch.jpg) | ![](docs/example_final.jpg) |
-```
 
 ---
 
@@ -164,12 +159,3 @@ python /root/autodl-tmp/beauty/app_gradio.py
 
 - RetouchFormer：高质量人脸修饰 Transformer，具备缺陷定位与“选择性自注意力”以替换瑕疵纹理。  
 - CSD-MT：内容-风格解耦的无监督美妆迁移方法，在无需伪真值的情况下实现自然妆容迁移。
-
-> 论文 PDF 可放置于 `docs/` 目录，便于引用。
-
----
-
-## 👤 作者与项目
-- **负责人**：刘天浩（哈尔滨工业大学 未来技术学院）  
-- **项目类型**：大学生创新创业训练计划（大创）  
-- **方向**：深度学习 · 图像处理 · 美妆迁移  

@@ -152,7 +152,7 @@ python /root/autodl-tmp/beauty/app_gradio.py
 
 ---
 
-## 🧩 开发计划（可作为后续工作）
+## 🧩 开发计划
 
 1. **前后端解耦**：以 FastAPI/Flask 提供 REST 接口，前端（Vue/React）异步调用；  
 2. **局部妆容编辑**：眼影/口红/腮红分区权重控件，支持局部开关；  

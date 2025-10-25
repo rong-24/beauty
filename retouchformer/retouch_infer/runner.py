@@ -130,6 +130,19 @@ class RetouchFormerRunner:
             t, _ = read_image_to_tensor(in_path, resize_to=self.size, debug=self.debug)
             t = t.to(self.device)
 
+            # === 新增：让输入 dtype 与模型一致 + 打印定位 ===
+            try:
+                model_dtype = next(self.model.parameters()).dtype
+            except StopIteration:
+                model_dtype = torch.float32
+            if t.dtype != model_dtype:
+                if self.debug:
+                    print(f"[infer_path] cast input from {t.dtype} to model dtype {model_dtype}")
+                t = t.to(dtype=model_dtype)
+            else:
+                if self.debug:
+                    print(f"[infer_path] input dtype matches model dtype: {t.dtype}")
+
             ph = pw = 0
             if self.size is None and self.multiple:
                 t, ph, pw = pad_to_multiple(t, self.multiple)

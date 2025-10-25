@@ -9,23 +9,23 @@ import torch.nn.functional as F
 ####################################################################
 
 class Generator(nn.Module):
-    def __init__(self,input_dim,parse_dim,ngf,device):
+    def __init__(self, input_dim, parse_dim, ngf, device):
         super(Generator, self).__init__()
-        self.ngf=ngf
+        self.ngf = ngf
         self.content_style_separation = Content_Style_Separation(device)
-        self.semantic_enc=Encoder_Semantic(parse_dim=parse_dim+2, ngf=ngf)
-        self.content_enc=Encoder_down4(input_dim=input_dim+1, ngf=ngf*2)
-        self.makeup_enc = Encoder_down4(input_dim=input_dim, ngf=ngf*2)
-        self.cross_atten=Attention(channels=ngf*4, norm='Instance', sn=False)
-        self.dec=Decoder_up4(ngf=ngf*2)
+        self.semantic_enc = Encoder_Semantic(parse_dim=parse_dim + 2, ngf=ngf)
+        self.content_enc = Encoder_down4(input_dim=input_dim + 1, ngf=ngf * 2)
+        self.makeup_enc = Encoder_down4(input_dim=input_dim, ngf=ngf * 2)
+        self.cross_atten = Attention(channels=ngf * 4, norm='Instance', sn=False)
+        self.dec = Decoder_up4(ngf=ngf * 2)
 
-    def forward_cross_attention(self,source_parse,ref_parse,ref_img):
+    def forward_cross_attention(self, source_parse, ref_parse, ref_img):
         source_semantic_f = self.semantic_enc(source_parse)
         ref_semantic_f = self.semantic_enc(ref_parse)
         ref_warp_img, corr_ref2source = self.cross_atten(source_semantic_f, ref_semantic_f, ref_img)
         return ref_warp_img
 
-    def forward(self,source_img,source_parse,source_all_mask,ref_img,ref_parse,ref_all_mask):
+    def forward(self, source_img, source_parse, source_all_mask, ref_img, ref_parse, ref_all_mask):
         source_back = source_img * (1. - source_all_mask)
 
         source_face = source_img * source_all_mask
@@ -34,41 +34,57 @@ class Generator(nn.Module):
         ref_face = ref_img * ref_all_mask
         ref_face_content, ref_face_style = self.content_style_separation(ref_face)
 
-        source_semantic_f=self.semantic_enc(source_parse)
-        ref_semantic_f=self.semantic_enc(ref_parse)
+        source_semantic_f = self.semantic_enc(source_parse)
+        ref_semantic_f = self.semantic_enc(ref_parse)
 
-        source_content_f_list=self.content_enc(torch.cat([source_face_content,source_back],dim=1))
-        
+        source_content_f_list = self.content_enc(torch.cat([source_face_content, source_back], dim=1))
+
         source_makeup = F.interpolate(source_face_style, scale_factor=0.25, mode='bilinear')
-        ref_makeup=F.interpolate(ref_face_style,scale_factor=0.25,mode='bilinear')
-        ref_makeup_warp,corr_ref2source=self.cross_atten(source_semantic_f,ref_semantic_f,ref_makeup)
+        ref_makeup = F.interpolate(ref_face_style, scale_factor=0.25, mode='bilinear')
+        ref_makeup_warp, corr_ref2source = self.cross_atten(source_semantic_f, ref_semantic_f, ref_makeup)
 
-        ref_makeup_warp=ref_makeup_warp*F.interpolate(source_all_mask,scale_factor=0.25)
+        ref_makeup_warp = ref_makeup_warp * F.interpolate(source_all_mask, scale_factor=0.25)
 
-        transfer_img=self.dec(source_content_f_list,ref_makeup_warp)
-        output_data={'source_face_content':source_face_content,'ref_face_style':ref_face_style,
-                     'transfer_img':transfer_img,'corr_ref2source':corr_ref2source,
-                     'ref_makeup_warp':ref_makeup_warp}
+        transfer_img = self.dec(source_content_f_list, ref_makeup_warp)
+        output_data = {
+            'source_face_content': source_face_content,
+            'ref_face_style': ref_face_style,
+            'transfer_img': transfer_img,
+            'corr_ref2source': corr_ref2source,
+            'ref_makeup_warp': ref_makeup_warp
+        }
         return output_data
 
 
-
 class Content_Style_Separation(nn.Module):
-    def __init__(self,device):
+    """
+    关键修复：
+    - kernel 以 nn.Parameter(requires_grad=False) 注册，确保出现在 state_dict 里（名字=content_style_separation.kernel），
+      从而能和 checkpoint 对齐，修复 Missing key 报错。
+    - 使用时自动对齐到输入 x 的 device/dtype。
+    """
+    def __init__(self, device):
         super(Content_Style_Separation, self).__init__()
-        self.kernel = self.gauss_kernel(device)
-        self.device=device
+        self.device = device
+        k = torch.tensor([
+            [1., 4., 6., 4., 1.],
+            [4., 16., 24., 16., 4.],
+            [6., 24., 36., 24., 6.],
+            [4., 16., 24., 16., 4.],
+            [1., 4., 6., 4., 1.]
+        ], dtype=torch.float32) / 256.0
+        # (C,1,5,5) for depthwise conv (groups=C)
+        k = k.repeat(3, 1, 1, 1)
+        # ★ 注册为“参数”，与 checkpoint 的键一致；不训练
+        self.kernel = nn.Parameter(k, requires_grad=False)
 
-    def gauss_kernel(self, device, channels=3):
-        kernel = torch.tensor([[1., 4., 6., 4., 1],
-                               [4., 16., 24., 16., 4.],
-                               [6., 24., 36., 24., 6.],
-                               [4., 16., 24., 16., 4.],
-                               [1., 4., 6., 4., 1.]])
-        kernel /= 256.
-        kernel = kernel.repeat(channels, 1, 1, 1)
-        kernel = kernel.to(device)
-        return kernel
+    def _kernel_like(self, x: torch.Tensor) -> torch.Tensor:
+        k = self.kernel
+        # 与输入对齐 device/dtype（移动整个模块也会自动带上 device，但 dtype 这里再兜一层）
+        if k.device != x.device or k.dtype != x.dtype:
+            k = k.to(device=x.device, dtype=x.dtype)
+        return k
+
     def conv_gauss(self, img, kernel):
         img = torch.nn.functional.pad(img, (2, 2, 2, 2), mode='reflect')
         out = torch.nn.functional.conv2d(img, kernel, groups=img.shape[1])
@@ -78,24 +94,32 @@ class Content_Style_Separation(nn.Module):
         return x[:, :, ::2, ::2]  # down-sampling
 
     def upsample(self, x):
-        cc = torch.cat([x, torch.zeros(x.shape[0], x.shape[1], x.shape[2], x.shape[3], device=x.device)], dim=3)
+        zeros1 = torch.zeros(x.shape[0], x.shape[1], x.shape[2], x.shape[3],
+                             device=x.device, dtype=x.dtype)
+        cc = torch.cat([x, zeros1], dim=3)
         cc = cc.view(x.shape[0], x.shape[1], x.shape[2] * 2, x.shape[3])
         cc = cc.permute(0, 1, 3, 2)
-        cc = torch.cat([cc, torch.zeros(x.shape[0], x.shape[1], x.shape[3], x.shape[2] * 2, device=x.device)], dim=3)
+        zeros2 = torch.zeros(x.shape[0], x.shape[1], x.shape[3], x.shape[2] * 2,
+                             device=x.device, dtype=x.dtype)
+        cc = torch.cat([cc, zeros2], dim=3)
         cc = cc.view(x.shape[0], x.shape[1], x.shape[3] * 2, x.shape[2] * 2)
         x_up = cc.permute(0, 1, 3, 2)
-        return self.conv_gauss(x_up, 4 * self.kernel)
+        k = self._kernel_like(x_up)
+        return self.conv_gauss(x_up, 4 * k)
 
-    def forward(self,img):
+    def forward(self, img):
+        k = self._kernel_like(img)
         current = img
-        filtered = self.conv_gauss(current, self.kernel)
+        filtered = self.conv_gauss(current, k)
         down = self.downsample(filtered)
         up = self.upsample(down)
-        content=current - up
-        style=up
-        # Grayscale
-        content = 0.299 * content[:, 0:1, ::] + 0.587 * content[:, 1:2,::] + 0.114 * content[:,2:3, ::]
-        content=content*(0.6+0.6*random.random())
+        content = current - up
+        style = up
+        # Grayscale（保持 dtype/device）
+        content = (0.299 * content[:, 0:1, ::] +
+                   0.587 * content[:, 1:2, ::] +
+                   0.114 * content[:, 2:3, ::])
+        content = content * (0.6 + 0.6 * random.random())
         return content, style
 
 
@@ -118,15 +142,15 @@ class Encoder_Semantic(nn.Module):
         self.up2 = Upsample(in_channels=ngf * 8, out_channels=ngf * 4, is_up=True)
 
     def forward(self, parse):
-        ins_feat = parse  # 当前实例特征tensor
-        # 生成从-1到1的线性值
-        x_range = torch.linspace(-1, 1, ins_feat.shape[-1], device=ins_feat.device)
-        y_range = torch.linspace(-1, 1, ins_feat.shape[-2], device=ins_feat.device)
-        y, x = torch.meshgrid(y_range, x_range)  # 生成二维坐标网格
-        y = y.expand([ins_feat.shape[0], 1, -1, -1])  # 扩充到和ins_feat相同维度
+        ins_feat = parse  # B,C,H,W
+        # 与输入同 device/dtype；meshgrid 指定 indexing
+        x_range = torch.linspace(-1, 1, ins_feat.shape[-1], device=ins_feat.device, dtype=ins_feat.dtype)
+        y_range = torch.linspace(-1, 1, ins_feat.shape[-2], device=ins_feat.device, dtype=ins_feat.dtype)
+        y, x = torch.meshgrid(y_range, x_range, indexing='ij')
+        y = y.expand([ins_feat.shape[0], 1, -1, -1])
         x = x.expand([ins_feat.shape[0], 1, -1, -1])
-        coord_feat = torch.cat([x, y], 1)  # 位置特征
-        input = torch.cat([ins_feat, coord_feat], 1)  # concatnate一起作为下一个卷积的输入
+        coord_feat = torch.cat([x, y], 1)
+        input = torch.cat([ins_feat, coord_feat], 1)
         output1 = self.conv1(input)
         output2 = self.conv2(output1)
         output3 = self.conv3(output2)
@@ -134,7 +158,7 @@ class Encoder_Semantic(nn.Module):
         output5 = self.conv5(output4)
         output = self.res1(output5)
         output = self.res2(output)
-        output = self.up1(output+output5)
+        output = self.up1(output + output5)
         output = self.up2(output + output4)
         return output
 
@@ -142,7 +166,6 @@ class Encoder_Semantic(nn.Module):
 class Encoder_down4(nn.Module):
     def __init__(self, input_dim, ngf=64):
         super(Encoder_down4, self).__init__()
-        # identity encoder
         self.conv1 = LeakyReLUConv2d(input_dim, ngf * 1, kernel_size=3, stride=1, padding=1, norm='instance')
         self.conv2 = LeakyReLUConv2d(ngf * 1, ngf * 2, kernel_size=3, stride=2, padding=1, norm='instance')
         self.conv3 = LeakyReLUConv2d(ngf * 2, ngf * 4, kernel_size=3, stride=2, padding=1, norm='instance')
@@ -173,24 +196,17 @@ class Attention(nn.Module):
         self.fb_conv = LeakyReLUConv2d(in_dim, in_dim // 4, kernel_size=1, stride=1, padding=0, norm=norm, sn=sn)
 
     def cal_correlation(self, fa, fb, alpha):
-        '''
-            calculate correspondence matrix and warp the exemplar features
-        '''
         assert fa.shape == fb.shape, \
             'Feature shape must match. Got %s in a and %s in b)' % (fa.shape, fb.shape)
         n, c, h, w = fa.shape
-        # subtract mean
         fa = fa - torch.mean(fa, dim=(2, 3), keepdim=True)
         fb = fb - torch.mean(fb, dim=(2, 3), keepdim=True)
-
-        # vectorize (merge dim H, W) and normalize channelwise vectors
         fa = fa.view(n, c, -1)
         fb = fb.view(n, c, -1)
         fa = fa / (torch.norm(fa, dim=1, keepdim=True) + self.eps)
         fb = fb / (torch.norm(fb, dim=1, keepdim=True) + self.eps)
-
         energy_ab_T = torch.bmm(fb.transpose(-2, -1), fa) * alpha
-        corr_ab_T = F.softmax(energy_ab_T, dim=1)  # n*HW*C @ n*C*HW -> n*HW*HW
+        corr_ab_T = F.softmax(energy_ab_T, dim=1)
         return corr_ab_T
 
     def forward(self, fa_raw, fb_raw, fc_raw):
@@ -198,7 +214,7 @@ class Attention(nn.Module):
         fb = self.fb_conv(fb_raw)
         corr_ab_T = self.cal_correlation(fa, fb, self.softmax_alpha)
         n, c, h, w = fc_raw.shape
-        fc_raw_warp = torch.bmm(fc_raw.view(n, c, h * w), corr_ab_T)  # n*HW*1
+        fc_raw_warp = torch.bmm(fc_raw.view(n, c, h * w), corr_ab_T)
         fc_raw_warp = fc_raw_warp.view(n, c, h, w)
         return fc_raw_warp, corr_ab_T
 
@@ -212,8 +228,6 @@ class Decoder_up4(nn.Module):
         super(Decoder_up4, self).__init__()
         self.spade1 = SPADEResnetBlock(fin=ngf * 4, fout=ngf * 4, semantic_nc=3)
         self.spade2 = SPADEResnetBlock(fin=ngf * 4, fout=ngf * 4, semantic_nc=3)
-        # self.spade3 = SPADEResnetBlock(fin=ngf * 4, fout=ngf * 4, semantic_nc=3)
-        # self.spade4 = SPADEResnetBlock(fin=ngf * 4, fout=ngf * 4, semantic_nc=3)
         self.up1 = Upsample(in_channels=ngf * 4, out_channels=ngf * 2, is_up=True)
         self.spade5 = SPADEResnetBlock(fin=ngf * 2, fout=ngf * 2, semantic_nc=3)
         self.up2 = Upsample(in_channels=ngf * 2, out_channels=ngf * 1, is_up=True)
@@ -224,10 +238,8 @@ class Decoder_up4(nn.Module):
 
     def forward(self, content_list, makeup):
         y = content_list[-1]
-        y = self.spade1(y,makeup)
+        y = self.spade1(y, makeup)
         y = self.spade2(y, makeup)
-        # y = self.spade3(y, makeup)
-        # y = self.spade4(y, makeup)
         y = self.up1(y + content_list[-2])
         y = self.spade5(y, makeup)
         y = self.up2(y + content_list[-3])
@@ -245,32 +257,22 @@ class Decoder_up4(nn.Module):
 class SPADEResnetBlock(nn.Module):
     def __init__(self, fin, fout, semantic_nc):
         super().__init__()
-        # Attributes
         self.learned_shortcut = (fin != fout)
         fmiddle = min(fin, fout)
-
-        # create conv layers
         self.conv_0 = nn.Conv2d(fin, fmiddle, kernel_size=3, padding=1)
         self.conv_1 = nn.Conv2d(fmiddle, fout, kernel_size=3, padding=1)
         if self.learned_shortcut:
             self.conv_s = nn.Conv2d(fin, fout, kernel_size=1, bias=False)
-
-        # define normalization layers
         self.norm_0 = SPADE(fin, semantic_nc)
         self.norm_1 = SPADE(fmiddle, semantic_nc)
         if self.learned_shortcut:
             self.norm_s = SPADE(fin, semantic_nc)
 
-    # note the resnet block with SPADE also takes in |seg|,
-    # the semantic segmentation map as input
     def forward(self, x, seg):
         x_s = self.shortcut(x, seg)
-
         dx = self.conv_0(self.actvn(self.norm_0(x, seg)))
         dx = self.conv_1(self.actvn(self.norm_1(dx, seg)))
-
         out = x_s + dx
-
         return out
 
     def shortcut(self, x, seg):
@@ -289,7 +291,6 @@ class SPADE(nn.Module):
         super().__init__()
         ks = 3
         self.param_free_norm = nn.InstanceNorm2d(norm_nc, affine=False)
-        # The dimension of the intermediate embedding space. Yes, hardcoded.
         nhidden = 128
         pw = ks // 2
         self.mlp_shared = nn.Sequential(
@@ -300,18 +301,12 @@ class SPADE(nn.Module):
         self.mlp_beta = nn.Conv2d(nhidden, norm_nc, kernel_size=ks, padding=pw)
 
     def forward(self, x, segmap):
-        # Part 1. generate parameter-free normalized activations
         normalized = self.param_free_norm(x)
-
-        # Part 2. produce scaling and bias conditioned on semantic map
         segmap = F.interpolate(segmap, size=x.size()[2:], mode='nearest')
         actv = self.mlp_shared(segmap)
         gamma = self.mlp_gamma(actv)
         beta = self.mlp_beta(actv)
-
-        # apply scale and bias
         out = normalized * (1 + gamma) + beta
-
         return out
 
 

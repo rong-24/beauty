@@ -1,40 +1,20 @@
-# Python / Conda
+# Python cache
 __pycache__/
-*.py[cod]
-*.so
-.venv/
-venv/
-env/
-*.egg-info/
-.ipynb_checkpoints
+*.pyc
+.ipynb_checkpoints/
+
+# Outputs
+outputs/
+outputs_batch/
+results/
+runs/
+*.log
+
+# Large weights (不要直接提交；建议 LFS 或手动下载)
+CSD_MT/CSD_MT/weights/
+CSD_MT/faceutils/face_parsing/res/cp/
+retouchformer/release_model/
 
 # OS
 .DS_Store
-
-# Logs & temp
-*.log
-logs/
-tmp/
-temp/
-
-# Project outputs / caches
-outputs/
-outputs_batch/
-**/results/
-**/rf_out/
-**/beauty_run_*/
-**/beauty_web_*/
-gradio_cached_examples/
-
-# Model weights (默认忽略大权重与checkpoints)
-*.pth
-*.pt
-*.ckpt
-*.safetensors
-**/release_model/*
-**/faceutils/res/cp/*.pth
-weights/
-
-# Data
-data/
-datasets/
+Thumbs.db

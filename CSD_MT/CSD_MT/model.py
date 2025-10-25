@@ -25,7 +25,7 @@ class CSD_MT(nn.Module):
 
     def resume(self, model_dir):
         checkpoint = torch.load(model_dir,map_location=torch.device('cpu'))
-        self.gen.load_state_dict(checkpoint['gen'])
+        self.gen.load_state_dict(checkpoint['gen'], strict=False)
         # optimizer
         return checkpoint['ep'], checkpoint['total_it']
 

@@ -1,7 +1,7 @@
-# ✨ 智能美妆与局部修饰融合技术
+# ✨ 智能人脸修饰与美妆迁移系统
 **RetouchFormer × CSD-MT 集成项目**
 
-本项目是大创课题“智能美妆与局部修饰融合技术”的实现部分。  
+本项目是大创课题“基于深度学习的人脸智能修饰与妆容迁移系统”的实现部分。  
 通过将 **RetouchFormer**（人脸瑕疵修饰）与 **CSD-MT**（无监督妆容迁移）串联，实现“先修饰、再上妆”的自动化流程，支持命令行与 Gradio 网页演示。
 
 ---
@@ -11,8 +11,12 @@
 ```text
 beauty/
 ├─ CSD_MT/                        # CSD-MT 模型目录
-│  ├─ model.py
-│  ├─ options.py
+│  ├─ CSD_MT/
+│  │  ├─ model.py
+│  │  ├─ modules.py
+│  │  ├─ options.py
+│  │  ├─ utils.py
+│  │  └─ weights
 │  ├─ run_csdmt.py
 │  ├─ csdmt_api.py
 │  ├─ examples/
@@ -25,22 +29,20 @@ beauty/
 │  ├─ retouch_infer/
 │  ├─ release_model/              # 预训练权重（best）
 │  ├─ model/
+│  ├─ op/
+│  ├─ test_images/
 │  └─ environment.yaml            # RetouchFormer conda 环境
 │
+├─ tools/                 
+│  ├─ batch_eval.py/              # 批量评价
+│  ├─ fit_lambda_grid/            # 具体结果
+│  └─ make_panels.py/             # 形成四排连图
 ├─ beauty_pipeline.sh             # ✅ 命令行一键流水线（先 RF 再 CSD-MT）
-├─ app_gradio.py                  # ✅ Gradio 网页端（四图展示）
+├─ app_inproc.py                  # ✅ Gradio 网页端（四图展示）
 └─ environment.yaml               # 主环境（beauty）
 ```
 
-**参数下载：**
-CSDMT和Retuochformer的参数均以百度网盘的方式提供
-| 模型 | 链接 | 密码 |  放置位置 |
-|---|---|---|---|
-| CSDMT | https://pan.baidu.com/s/1eVgPN12KJN8GSdOw544ZdQ |  reto  | /beauty/CSD_MT/faceutils/face_parsing/res/cp/79999_iter.pth|
-| Retouchformer | https://pan.baidu.com/s/1C7K4xk5W0X65yUQh41AmfQ | 1d3e |  /beauty/retouchformer/release_model/gen_best.pth |
-
 **环境文件位置：**
-- 主环境（beauty）：`/root/autodl-tmp/beauty/environment.yaml`
 - CSD-MT：`/root/autodl-tmp/beauty/CSD_MT/environment.yaml`
 - RetouchFormer：`/root/autodl-tmp/beauty/retouchformer/environment.yaml`
 
@@ -62,11 +64,8 @@ CSDMT和Retuochformer的参数均以百度网盘的方式提供
 
 ## ⚙️ 环境准备
 
-使用各自 `environment.yaml` 创建环境（示例）：
+使用各自 `environment.yaml` 创建环境（示例），最终用Retouchformer进行整合：
 ```bash
-# 主环境（含 gradio、整合脚本）
-conda env create -f /root/autodl-tmp/beauty/environment.yaml
-
 # CSD-MT
 conda env create -f /root/autodl-tmp/beauty/CSD_MT/environment.yaml
 
@@ -78,7 +77,7 @@ conda env create -f /root/autodl-tmp/beauty/retouchformer/environment.yaml
 
 ---
 
-## 🚀 命令行一键流水线
+## 🚀 命令行一键流水线（推荐）
 
 脚本：`beauty_pipeline.sh`（已适配两个独立 conda 环境）。
 
@@ -117,14 +116,22 @@ conda env create -f /root/autodl-tmp/beauty/retouchformer/environment.yaml
 
 ## 💻 Gradio 网页演示（四图同屏）
 
-脚本：`app_gradio.py`  
+脚本：`app_inproc.py`  
 功能：上传**原图**与**妆容图**，一键输出 **原图 / 妆容 / 修饰 / 成品** 四图对比。
 
 ### 运行
 ```bash
-python /root/autodl-tmp/beauty/app_gradio.py
+python /root/autodl-tmp/beauty/app_inproc.py
 # 浏览器访问：http://<服务器IP>:7860
 ```
+>### 主要特性：###
+>RetouchFormer 与 CSD-MT 在同一进程与 GPU 上推理，显著减少显存切换与IO耗时；
+>自动 AMP 控制：RetouchFormer(AMP=关)，CSD-MT(AMP=开)；
+>结果可视化直观展示修饰与上妆前后差异。
+| 阶段       | 总耗时        | RetouchFormer | CSD-MT | 优化方式                |
+| -------- | ---------- | ------------- | ------ | ------------------- |
+| 原版（分进程）  | **15.90s** | 8.49s         | 7.35s  | 多环境切换 + IO传递        |
+| 优化后（同进程） | **8.24s**  | 6.58s         | 1.66s  | 同进程 + AMP分策略 + 设备对齐 |
 
 ### 页面功能
 - 示例图：读取 `CSD_MT/examples/non_makeup` 与 `CSD_MT/examples/makeup` 作为演示素材；
@@ -147,18 +154,16 @@ python /root/autodl-tmp/beauty/app_gradio.py
 
 ## 📈 示例输出
 
-<img width="1212" height="798" alt="图片" src="https://github.com/user-attachments/assets/421aa507-1df2-4faf-8a57-765926922026" />
-
-
+![alt text](image.png)
 ---
 
-## 🧩 开发计划
+## 🧩 关键优化点
 
-1. **前后端解耦**：以 FastAPI/Flask 提供 REST 接口，前端（Vue/React）异步调用；  
-2. **局部妆容编辑**：眼影/口红/腮红分区权重控件，支持局部开关；  
-3. **风格检索**：基于 CLIP 的妆容检索与自动推荐；  
-4. **轻量化部署**：ONNX/TensorRT、模型剪枝与混合精度；  
-5. **数据增强**：扩展不同光照/姿态/肤色数据，提升泛化稳定性。  
+1. **同进程融合（In-Process Integration）**：去除子进程间通信与文件IO；  
+2. **GPU与dtype统一**：所有中间张量 .to(self.device)；  
+3. **分模型 AMP 控制**：RetouchFormer 保真关闭、CSD-MT 加速开启；  
+4. **权重加载兼容修复**：strict=False 避免不匹配键；  
+5. **显存复用与常驻加载**：减少初始化开销。  
 
 ---
 
